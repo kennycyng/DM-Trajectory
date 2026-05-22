@@ -1,0 +1,18 @@
+.depend
+coverage.info
+
+build/
+external/
+lib/
+results/
+
+# Ignore build files
+*.o
+
+# Ignore codecove files
+*.gcov
+*.gcda
+*.gcno
+
+
+

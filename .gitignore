@@ -1,0 +1,14 @@
+.deps/
+build/
+build-*/
+output/
+smoke_output/
+
+*.o
+*.a
+*.dylib
+*.so
+*.dll
+*.exe
+
+vendor/damascus/external/obscura/bin/obscura
