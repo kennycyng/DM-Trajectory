@@ -1,13 +1,8 @@
 # DaMaSCUS-SUN Trajectory
 
+Trajectory-only runner for DaMaSCUS-SUN. The executable writes each simulated trajectory to plain text files.
 
-## Portable Package
-
-This directory is intended to be copied as a source-only package. It should contain only the project source, vendored DaMaSCUS/obscura/libphysica source, configs, and documentation.
-
-Do not copy generated or machine-local directories such as `.deps/`, `build/`, `build-*`, `output/`, or `smoke_output/`. Install third-party toolchains and libraries on the target machine, then configure a fresh `build/` directory there.
-
-## Required Versions
+## Requirements
 
 - CMake 3.21.2
 - Boost 1.77.0
@@ -16,13 +11,13 @@ Do not copy generated or machine-local directories such as `.deps/`, `build/`, `
 - A C++11 build mode
 - libconfig++
 
-The project intentionally pins Boost to 1.77.0 because newer Boost.Math releases require C++14 and break the C++11 DaMaSCUS/libphysica build.
+Boost is pinned to 1.77.0 because newer Boost.Math releases require C++14, while this DaMaSCUS/libphysica build uses C++11.
 
-## Install Dependencies On A New Machine
+## Install Dependencies
 
-### Cluster Modules
+### Linux
 
-If the target machine provides environment modules, prefer the site-managed modules and load the exact versions before configuring:
+With environment modules:
 
 ```bash
 module purge
@@ -33,9 +28,7 @@ module load boost/1.77.0
 module load libconfig
 ```
 
-### Manual CMake 3.21.2 Install
-
-If CMake 3.21.2 is not provided as a module, install the official binary release outside this project directory:
+Without modules:
 
 ```bash
 mkdir -p $HOME/opt
@@ -43,11 +36,38 @@ cd $HOME/opt
 curl -L -o cmake-3.21.2-linux-x86_64.tar.gz https://github.com/Kitware/CMake/releases/download/v3.21.2/cmake-3.21.2-linux-x86_64.tar.gz
 tar -xzf cmake-3.21.2-linux-x86_64.tar.gz
 export PATH=$HOME/opt/cmake-3.21.2-linux-x86_64/bin:$PATH
+
+curl -L -o boost_1_77_0.tar.gz https://archives.boost.io/release/1.77.0/source/boost_1_77_0.tar.gz
+tar -xzf boost_1_77_0.tar.gz
+export BOOST_ROOT=$HOME/opt/boost_1_77_0
 ```
 
-### Manual Boost 1.77.0 Install
+Install libconfig++ with the system package manager:
 
-If Boost 1.77.0 is not provided as a module, install it outside this project directory. This code only uses Boost headers, so extracting the official source archive is sufficient:
+```bash
+# Ubuntu or Debian
+sudo apt update
+sudo apt install -y libconfig++-dev
+
+# RHEL, Rocky Linux, or Fedora
+sudo dnf install -y libconfig-devel
+```
+
+Initialize Intel oneAPI if it is installed under the default prefix:
+
+```bash
+source /opt/intel/oneapi/setvars.sh
+```
+
+### macOS
+
+Install CMake, libconfig++, and MPI with Homebrew:
+
+```bash
+brew install cmake libconfig open-mpi
+```
+
+Install Boost 1.77.0 as a header prefix:
 
 ```bash
 mkdir -p $HOME/opt
@@ -57,48 +77,25 @@ tar -xzf boost_1_77_0.tar.gz
 export BOOST_ROOT=$HOME/opt/boost_1_77_0
 ```
 
-### Intel oneAPI And Intel MPI
-
-Intel oneAPI 2022.2 and Intel MPI 2021.6.0 are normally installed by the cluster administrator or loaded through modules. If they are manually installed under the default prefix, initialize them before configuring:
-
-```bash
-source /opt/intel/oneapi/setvars.sh
-export I_MPI_CC=icx
-export I_MPI_CXX=icpx
-```
-
-Use the Intel MPI compiler wrappers for this project. On many oneAPI 2022.2 installations these are named `mpiicc` and `mpiicpc`.
-
-### libconfig++
-
-Install libconfig++ through the target machine's package manager or module system:
-
-```bash
-# Ubuntu or Debian
-sudo apt update
-sudo apt install -y libconfig++-dev
-
-# RHEL or Rocky Linux with EPEL enabled
-sudo dnf install -y libconfig-devel
-```
-
 Check that the expected tools are active:
 
 ```bash
 cmake --version
 icpx --version
-mpiicpc -show
 mpirun --version
 ```
 
-The Boost check should report version 1.77.0 during CMake configure. If it reports another version, remove the build directory and reconfigure with the `BOOST_ROOT` and `Boost_INCLUDE_DIR` options shown below.
+On Linux with Intel MPI, also check:
+
+```bash
+mpiicpc -show
+```
 
 ## Build
 
-Copy this source package to the target machine, install dependencies as above, then configure with Intel MPI compiler wrappers and the pinned Boost 1.77.0 include tree:
+Linux with Intel MPI:
 
 ```bash
-cd trajectory_txt_container
 rm -rf build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 	-DCMAKE_C_COMPILER=mpiicc \
@@ -110,40 +107,21 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build --target DaMaSCUS-SUN-TrajectoryTXT --config Release -j4
 ```
 
-On the cluster sandbox, the full flow is:
+macOS with Homebrew MPI:
 
 ```bash
-ssh sandbox
-cd /project/kennyng/backup_DM/trajectory_txt_container
-module purge
-module load cmake/3.21.2
-module load intel-oneapi/2022.2
-module load intel-mpi/2021.6.0
-module load boost/1.77.0
-module load libconfig
-if [ -z "$BOOST_ROOT" ]; then
-	export BOOST_ROOT=$HOME/opt/boost_1_77_0
-fi
 rm -rf build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-	-DCMAKE_C_COMPILER=mpiicc \
-	-DCMAKE_CXX_COMPILER=mpiicpc \
 	-DBoost_NO_BOOST_CMAKE=ON \
 	-DBoost_NO_SYSTEM_PATHS=ON \
 	-DBOOST_ROOT=$BOOST_ROOT \
 	-DBoost_INCLUDE_DIR=$BOOST_ROOT
 cmake --build build --target DaMaSCUS-SUN-TrajectoryTXT --config Release -j4
-```
-
-If the Boost module does not set `BOOST_ROOT`, set it manually to the Boost 1.77.0 prefix, for example:
-
-```bash
-export BOOST_ROOT=$HOME/opt/boost_1_77_0
 ```
 
 ## Run
 
-Quick smoke test after building:
+Smoke test:
 
 ```bash
 mpirun -np 1 ./build/DaMaSCUS-SUN-TrajectoryTXT config/smoke.cfg
