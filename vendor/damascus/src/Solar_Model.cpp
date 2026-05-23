@@ -1,6 +1,8 @@
 #include "Solar_Model.hpp"
 
 #include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <mpi.h>
 
 #include "libphysica/Integration.hpp"
@@ -367,6 +369,82 @@ void Solar_Model::Interpolate_Total_DM_Scattering_Rate(obscura::DM_Particle& DM,
 			for(auto& speed : speeds)
 				rates.push_back({radius, speed, global_rates[i++]});
 		rate_interpolation = libphysica::Interpolation_2D(rates);
+	}
+}
+
+void Solar_Model::Save_Rate_Cache(const std::string& filename)
+{
+	std::ofstream file(filename, std::ios::binary);
+	if(!file)
+	{
+		std::cerr << "Warning: Could not open cache file for writing: " << filename << std::endl;
+		return;
+	}
+	const char magic[8] = {'D','M','S','C','A','C','H','E'};
+	file.write(magic, 8);
+	int version = 2;
+	file.write(reinterpret_cast<const char*>(&version), sizeof(int));
+
+	unsigned int N_r = 1000;
+	unsigned int N_v = 1000;
+	file.write(reinterpret_cast<const char*>(&N_r), sizeof(unsigned int));
+	file.write(reinterpret_cast<const char*>(&N_v), sizeof(unsigned int));
+
+	std::vector<double> radii  = libphysica::Linear_Space(rate_interpolation.domain[0][0], rate_interpolation.domain[0][1], N_r);
+	std::vector<double> speeds = libphysica::Linear_Space(rate_interpolation.domain[1][0], rate_interpolation.domain[1][1], N_v);
+	file.write(reinterpret_cast<const char*>(radii.data()),  N_r * sizeof(double));
+	file.write(reinterpret_cast<const char*>(speeds.data()), N_v * sizeof(double));
+
+	std::vector<std::vector<double>> func_values(N_r, std::vector<double>(N_v));
+	for(unsigned int i = 0; i < N_r; i++)
+		for(unsigned int j = 0; j < N_v; j++)
+			func_values[i][j] = rate_interpolation(radii[i], speeds[j]);
+	for(unsigned int i = 0; i < N_r; i++)
+		file.write(reinterpret_cast<const char*>(func_values[i].data()), N_v * sizeof(double));
+	file.close();
+}
+
+bool Solar_Model::Load_Rate_Cache(const std::string& filename)
+{
+	std::ifstream file(filename, std::ios::binary);
+	if(!file)
+		return false;
+
+	char magic[8];
+	file.read(magic, 8);
+	if(std::string(magic, 8) != "DMSCACHE")
+		return false;
+
+	int version;
+	file.read(reinterpret_cast<char*>(&version), sizeof(int));
+	if(version != 2)
+		return false;
+
+	unsigned int N_r, N_v;
+	file.read(reinterpret_cast<char*>(&N_r), sizeof(unsigned int));
+	file.read(reinterpret_cast<char*>(&N_v), sizeof(unsigned int));
+
+	std::vector<double> radii(N_r);
+	std::vector<double> speeds(N_v);
+	file.read(reinterpret_cast<char*>(radii.data()),  N_r * sizeof(double));
+	file.read(reinterpret_cast<char*>(speeds.data()), N_v * sizeof(double));
+
+	std::vector<std::vector<double>> func_values(N_r, std::vector<double>(N_v));
+	for(unsigned int i = 0; i < N_r; i++)
+		file.read(reinterpret_cast<char*>(func_values[i].data()), N_v * sizeof(double));
+
+	if(!file)
+		return false;
+
+	try
+	{
+		rate_interpolation = libphysica::Interpolation_2D(radii, speeds, func_values);
+		using_interpolated_rate = true;
+		return true;
+	}
+	catch(...)
+	{
+		return false;
 	}
 }
 

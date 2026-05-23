@@ -26,6 +26,7 @@
 #include "obscura/DM_Particle.hpp"
 #include "obscura/DM_Particle_Standard.hpp"
 
+#include "Binary_Trajectory_Writer.hpp"
 #include "Dark_Photon.hpp"
 #include "Simulation_Trajectory.hpp"
 #include "Simulation_Utilities.hpp"
@@ -52,6 +53,8 @@ struct Run_Config
 	bool clear_existing_trajectories = true;
 	unsigned int trajectory_write_stride = 1;
 	int txt_precision = 10;
+	std::string output_format = "txt";
+	std::size_t binary_buffer_size = 1024;
 };
 
 struct Trajectory_Stats
@@ -244,6 +247,14 @@ Run_Config Read_Run_Config(const Config& config)
 	int write_stride = Optional_Value<int>(config, "trajectory_write_stride", 1);
 	run.trajectory_write_stride = (write_stride > 0) ? static_cast<unsigned int>(write_stride) : 1;
 	run.txt_precision = Optional_Value<int>(config, "txt_precision", 10);
+	run.output_format = Optional_String(config, "output_format", "txt");
+	if(run.output_format != "txt" && run.output_format != "binary")
+	{
+		std::cerr << "output_format must be 'txt' or 'binary'. Got: " << run.output_format << std::endl;
+		std::exit(EXIT_FAILURE);
+	}
+	int bin_buf = Optional_Value<int>(config, "binary_buffer_size", 1024);
+	run.binary_buffer_size = (bin_buf > 0) ? static_cast<std::size_t>(bin_buf) : 1024;
 
 	if(run.txt_precision < 6)
 		run.txt_precision = 6;
@@ -359,18 +370,34 @@ double Event_Energy_Ev(const Event& event, Solar_Model& solar_model, obscura::DM
 	return In_Units(energy, eV);
 }
 
-void Write_Trajectory_Row(std::ofstream& file, const Event& event, Solar_Model& solar_model, obscura::DM_Particle& DM, int precision, Trajectory_Stats& stats)
+void Write_Trajectory_Row(std::ofstream* file, BinaryTrajectoryWriter* bin, const Event& event, Solar_Model& solar_model, obscura::DM_Particle& DM, int precision, Trajectory_Stats& stats)
 {
-	file << std::scientific << std::setprecision(precision)
-	     << In_Units(event.time, sec) << "\t"
-	     << In_Units(event.position[0], km) << "\t"
-	     << In_Units(event.position[1], km) << "\t"
-	     << In_Units(event.position[2], km) << "\t"
-	     << In_Units(event.velocity[0], km / sec) << "\t"
-	     << In_Units(event.velocity[1], km / sec) << "\t"
-	     << In_Units(event.velocity[2], km / sec) << "\t"
-	     << Event_Energy_Ev(event, solar_model, DM) << "\n";
-	stats.rows_written++;
+	if(file)
+	{
+		*file << std::scientific << std::setprecision(precision)
+		      << In_Units(event.time, sec) << "\t"
+		      << In_Units(event.position[0], km) << "\t"
+		      << In_Units(event.position[1], km) << "\t"
+		      << In_Units(event.position[2], km) << "\t"
+		      << In_Units(event.velocity[0], km / sec) << "\t"
+		      << In_Units(event.velocity[1], km / sec) << "\t"
+		      << In_Units(event.velocity[2], km / sec) << "\t"
+		      << Event_Energy_Ev(event, solar_model, DM) << "\n";
+		stats.rows_written++;
+	}
+	if(bin)
+	{
+		TrajectoryPoint p;
+		p.t  = In_Units(event.time, sec);
+		p.x  = In_Units(event.position[0], km);
+		p.y  = In_Units(event.position[1], km);
+		p.z  = In_Units(event.position[2], km);
+		p.vx = In_Units(event.velocity[0], km / sec);
+		p.vy = In_Units(event.velocity[1], km / sec);
+		p.vz = In_Units(event.velocity[2], km / sec);
+		p.E  = Event_Energy_Ev(event, solar_model, DM);
+		bin->WritePoint(p);
+	}
 }
 
 double RK45_Absolute_Max_Time_Step()
@@ -407,7 +434,7 @@ bool Outward_Escaping_At_Boundary(const Event& event, Solar_Model& solar_model, 
 	return radial_velocity > 0.0 && event.Speed() > solar_model.Local_Escape_Speed(radius);
 }
 
-Free_Propagation_Result Propagate_Freely_To_Txt(Event& current_event, obscura::DM_Particle& DM, Solar_Model& solar_model, Trajectory_Simulator& simulator, const Run_Config& run_config, std::ofstream& trajectory_file, std::chrono::steady_clock::time_point trajectory_wall_start, Trajectory_Stats& stats)
+Free_Propagation_Result Propagate_Freely_To_Txt(Event& current_event, obscura::DM_Particle& DM, Solar_Model& solar_model, Trajectory_Simulator& simulator, const Run_Config& run_config, std::ofstream* trajectory_file, BinaryTrajectoryWriter* bin_writer, std::chrono::steady_clock::time_point trajectory_wall_start, Trajectory_Stats& stats)
 {
 	if(Outward_Escaping_At_Boundary(current_event, solar_model, run_config.initial_radius))
 		return Free_Propagation_Result::Escape;
@@ -461,7 +488,7 @@ Free_Propagation_Result Propagate_Freely_To_Txt(Event& current_event, obscura::D
 
 		current_event = particle_propagator.Event_In_3D();
 		if(stats.rk45_steps % run_config.trajectory_write_stride == 0)
-			Write_Trajectory_Row(trajectory_file, current_event, solar_model, DM, run_config.txt_precision, stats);
+			Write_Trajectory_Row(trajectory_file, bin_writer, current_event, solar_model, DM, run_config.txt_precision, stats);
 
 		if(Event_Energy_Ev(current_event, solar_model, DM) < 0.0)
 		{
@@ -497,25 +524,26 @@ Free_Propagation_Result Propagate_Freely_To_Txt(Event& current_event, obscura::D
 	return Free_Propagation_Result::StepLimit;
 }
 
-Trajectory_Stats Simulate_Trajectory_To_Txt(Event initial_condition, obscura::DM_Particle& DM, Solar_Model& solar_model, Trajectory_Simulator& simulator, const Run_Config& run_config, std::ofstream& trajectory_file)
+Trajectory_Stats Simulate_Trajectory_To_Txt(Event initial_condition, obscura::DM_Particle& DM, Solar_Model& solar_model, Trajectory_Simulator& simulator, const Run_Config& run_config, std::ofstream* trajectory_file, BinaryTrajectoryWriter* bin_writer)
 {
 	Trajectory_Stats stats;
 	Event current_event = initial_condition;
 	auto trajectory_wall_start = std::chrono::steady_clock::now();
 
-	trajectory_file << "# columns: time_s x_km y_km z_km vx_km_s vy_km_s vz_km_s E_eV\n";
-	Write_Trajectory_Row(trajectory_file, current_event, solar_model, DM, run_config.txt_precision, stats);
+	if(trajectory_file)
+		*trajectory_file << "# columns: time_s x_km y_km z_km vx_km_s vy_km_s vz_km_s E_eV\n";
+	Write_Trajectory_Row(trajectory_file, bin_writer, current_event, solar_model, DM, run_config.txt_precision, stats);
 	if(Event_Energy_Ev(current_event, solar_model, DM) < 0.0)
 		stats.captured = true;
 
 	while(stats.scatterings < run_config.maximum_number_of_scatterings)
 	{
-		Free_Propagation_Result result = Propagate_Freely_To_Txt(current_event, DM, solar_model, simulator, run_config, trajectory_file, trajectory_wall_start, stats);
+		Free_Propagation_Result result = Propagate_Freely_To_Txt(current_event, DM, solar_model, simulator, run_config, trajectory_file, bin_writer, trajectory_wall_start, stats);
 		if(result == Free_Propagation_Result::Scatter)
 		{
 			simulator.Scatter(current_event, DM);
 			stats.scatterings++;
-			Write_Trajectory_Row(trajectory_file, current_event, solar_model, DM, run_config.txt_precision, stats);
+			Write_Trajectory_Row(trajectory_file, bin_writer, current_event, solar_model, DM, run_config.txt_precision, stats);
 			if(Event_Energy_Ev(current_event, solar_model, DM) < 0.0)
 			{
 				stats.captured = true;
@@ -600,7 +628,47 @@ int main(int argc, char* argv[])
 		          << "MPI processes: " << mpi_processes << std::endl
 		          << "Output mode: trajectory txt files only" << std::endl;
 	}
-	solar_model.Interpolate_Total_DM_Scattering_Rate(*DM, run_config.interpolation_points, run_config.interpolation_points);
+
+	// Rate interpolation cache
+	std::string interaction_type = "Unknown";
+	if(dynamic_cast<obscura::DM_Particle_SI*>(DM.get()))
+		interaction_type = "SI";
+	else if(dynamic_cast<obscura::DM_Particle_SD*>(DM.get()))
+		interaction_type = "SD";
+	else if(dynamic_cast<DM_Particle_Dark_Photon*>(DM.get()))
+		interaction_type = "DP";
+
+	bool dm_light = Optional_Value<bool>(config, "DM_light", false);
+
+	std::ostringstream cache_name;
+	cache_name << std::scientific << std::setprecision(6)
+	           << "rate_" << interaction_type
+	           << "_m" << In_Units(DM->mass, GeV)
+	           << "_lm" << (dm_light ? 1 : 0)
+	           << "_sp" << In_Units(DM->Sigma_Proton(), cm * cm)
+	           << "_se" << In_Units(DM->Sigma_Electron(), cm * cm)
+	           << ".bin";
+	std::string cache_dir = Join_Path(run_config.output_dir, ".cache");
+	std::string cache_file = Join_Path(cache_dir, cache_name.str());
+
+	bool cache_loaded = solar_model.Load_Rate_Cache(cache_file);
+	int all_loaded = cache_loaded ? 1 : 0;
+	MPI_Allreduce(MPI_IN_PLACE, &all_loaded, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+	if(all_loaded)
+	{
+		if(mpi_rank == 0)
+			std::cout << "Loaded rate interpolation from cache: " << cache_file << std::endl;
+	}
+	else
+	{
+		solar_model.Interpolate_Total_DM_Scattering_Rate(*DM, run_config.interpolation_points, run_config.interpolation_points);
+		if(mpi_rank == 0)
+		{
+			Ensure_Directory_Exists(cache_dir);
+			solar_model.Save_Rate_Cache(cache_file);
+			std::cout << "Saved rate interpolation cache: " << cache_file << std::endl;
+		}
+	}
 
 	std::string output_dir = Parameter_Output_Directory(run_config, *DM);
 	if(mpi_rank == 0)
@@ -632,21 +700,34 @@ int main(int argc, char* argv[])
 	bool early_stopped = false;
 	int last_milestone = -1;
 
+	BinaryTrajectoryWriter bin_writer(run_config.binary_buffer_size);
+	if(run_config.output_format == "binary")
+		bin_writer.Open(mpi_rank, output_dir);
+
 	while(local_captured < target_captured_per_rank && local_total < max_trajectories_per_rank)
 	{
 		unsigned long int local_id = local_total + 1;
 		std::string trajectory_path = Trajectory_File_Path(output_dir, local_id, mpi_rank);
-		std::ofstream trajectory_file(trajectory_path.c_str(), std::ios::out | std::ios::trunc);
-		if(!trajectory_file)
+		std::ofstream trajectory_file;
+		if(run_config.output_format == "txt")
 		{
-			std::cerr << "Rank " << mpi_rank << " could not open " << trajectory_path << std::endl;
-			MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+			trajectory_file.open(trajectory_path.c_str(), std::ios::out | std::ios::trunc);
+			if(!trajectory_file)
+			{
+				std::cerr << "Rank " << mpi_rank << " could not open " << trajectory_path << std::endl;
+				MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+			}
 		}
 
 		Event initial_condition = Initial_Conditions(*DM_distribution, solar_model, simulator.PRNG);
 		Hyperbolic_Kepler_Shift(initial_condition, run_config.initial_radius);
-		Trajectory_Stats stats = Simulate_Trajectory_To_Txt(initial_condition, *DM, solar_model, simulator, run_config, trajectory_file);
-		trajectory_file.close();
+		if(run_config.output_format == "binary")
+			bin_writer.BeginTrajectory(local_id);
+		Trajectory_Stats stats = Simulate_Trajectory_To_Txt(initial_condition, *DM, solar_model, simulator, run_config, run_config.output_format == "txt" ? &trajectory_file : nullptr, run_config.output_format == "binary" ? &bin_writer : nullptr);
+		if(run_config.output_format == "binary")
+			bin_writer.EndTrajectory();
+		if(trajectory_file.is_open())
+			trajectory_file.close();
 
 		local_total++;
 		local_rows += stats.rows_written;

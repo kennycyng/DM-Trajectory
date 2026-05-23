@@ -67,6 +67,9 @@ class Solar_Model
 	double Total_DM_Scattering_Rate_Interpolated(obscura::DM_Particle& DM, double r, double DM_speed);
 	void Interpolate_Total_DM_Scattering_Rate(obscura::DM_Particle& DM, unsigned int N_radius, unsigned int N_speed);
 
+	void Save_Rate_Cache(const std::string& filename);
+	bool Load_Rate_Cache(const std::string& filename);
+
 	void Print_Summary(int mpi_rank = 0) const;
 };
 

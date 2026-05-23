@@ -65,7 +65,8 @@ target_link_libraries(damascus_trajectory_core
     ${MPI_CXX_LIBRARIES})
 
 add_executable(DaMaSCUS-SUN-TrajectoryTXT
-  src/main.cpp)
+  src/main.cpp
+  src/Binary_Trajectory_Writer.cpp)
 
 target_compile_options(DaMaSCUS-SUN-TrajectoryTXT PUBLIC -Wall -pedantic)
 target_include_directories(DaMaSCUS-SUN-TrajectoryTXT
