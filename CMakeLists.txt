@@ -52,7 +52,7 @@ add_library(damascus_trajectory_core STATIC
   "${DAMASCUS_SRC_DIR}/Simulation_Utilities.cpp"
   "${DAMASCUS_SRC_DIR}/Solar_Model.cpp")
 
-target_compile_options(damascus_trajectory_core PUBLIC -Wall -pedantic)
+target_compile_options(damascus_trajectory_core PUBLIC -Wall -pedantic -march=native)
 target_include_directories(damascus_trajectory_core
   PUBLIC
     "${DAMASCUS_INCLUDE_DIR}"
@@ -68,7 +68,7 @@ add_executable(DaMaSCUS-SUN-TrajectoryTXT
   src/main.cpp
   src/Binary_Trajectory_Writer.cpp)
 
-target_compile_options(DaMaSCUS-SUN-TrajectoryTXT PUBLIC -Wall -pedantic)
+target_compile_options(DaMaSCUS-SUN-TrajectoryTXT PUBLIC -Wall -pedantic -march=native)
 target_include_directories(DaMaSCUS-SUN-TrajectoryTXT
   PRIVATE
     "${DAMASCUS_INCLUDE_DIR}"

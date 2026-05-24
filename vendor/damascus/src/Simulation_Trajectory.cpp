@@ -96,7 +96,7 @@ double RK45_Next_Step_Size(double current_step, const double errors[3], const do
 		if(errors[i] <= 0.0)
 			continue;
 
-		const double candidate = 0.84 * pow(tolerances[i] / errors[i], 0.25);
+		const double candidate = 0.84 * sqrt(sqrt(tolerances[i] / errors[i]));
 		if(std::isfinite(candidate))
 			factor = std::min(factor, candidate);
 	}
@@ -347,7 +347,8 @@ bool Trajectory_Simulator::Propagate_Freely(Event& current_event, obscura::DM_Pa
 		bool captured_now = Update_Capture_State(r_after, v_after, particle_propagator.Current_Time(), DM);
 
 		current_trajectory_physical_time_sec = t_now_sec;
-		Publish_Snapshot_Progress();
+		if((time_steps % 1000) == 0)
+			Publish_Snapshot_Progress();
 
 		if(terminate_on_capture && captured_now)
 		{
@@ -663,12 +664,12 @@ void Free_Particle_Propagator::Runge_Kutta_45_Step(Solar_Model& solar_model)
 	if(RK45_Errors_Within_Tolerance(errors, error_tolerances))
 	{
 		time	  = time + time_step;
-		radius	  = radius_4;
+		radius	  = radius_5;
 		// 边界检查：防止半径变为负数（数值误差）
 		if(radius < 0.0)
 			radius = 0.0;
-		v_radial  = v_radial_4;
-		phi		  = phi_4;
+		v_radial  = v_radial_5;
+		phi		  = phi_5;
 		time_step = time_step_new;
 		accepted  = true;
 	}
@@ -692,11 +693,11 @@ void Free_Particle_Propagator::Runge_Kutta_45_Step(Solar_Model& solar_model)
 			time = time + abs_min_step;
 			if(state_ok)
 			{
-				radius = radius_4;
+				radius = radius_5;
 				if(radius < 0.0)
 					radius = 0.0;
-				v_radial = v_radial_4;
-				phi      = phi_4;
+				v_radial = v_radial_5;
+				phi      = phi_5;
 			}
 			time_step = abs_min_step;
 			accepted  = true;
@@ -760,11 +761,11 @@ void Free_Particle_Propagator::Runge_Kutta_45_Step(double constant_mass)
 	if(RK45_Errors_Within_Tolerance(errors, error_tolerances))
 	{
 		time	  = time + time_step;
-		radius	  = radius_4;
+		radius	  = radius_5;
 		if(radius < 0.0)
 			radius = 0.0;
-		v_radial  = v_radial_4;
-		phi		  = phi_4;
+		v_radial  = v_radial_5;
+		phi		  = phi_5;
 		time_step = time_step_new;
 		accepted  = true;
 	}
@@ -780,11 +781,11 @@ void Free_Particle_Propagator::Runge_Kutta_45_Step(double constant_mass)
 			time = time + abs_min_step;
 			if(state_ok)
 			{
-				radius = radius_4;
+				radius = radius_5;
 				if(radius < 0.0)
 					radius = 0.0;
-				v_radial = v_radial_4;
-				phi      = phi_4;
+				v_radial = v_radial_5;
+				phi      = phi_5;
 			}
 			time_step = abs_min_step;
 			accepted  = true;
